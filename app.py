@@ -409,7 +409,7 @@ if "lang" not in st.session_state:
 with st.sidebar:
     lang_choice = st.radio(
         "🌐 Language / Язык",
-        ["🇷🇺 Русский", "🇬🇧 English"],
+        ["🇷🇺 Русский", "en English"],
         index=0 if st.session_state.lang == "ru" else 1,
         key="lang_selector"
     )
