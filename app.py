@@ -3,6 +3,7 @@ CryoProtect-Screener: Web application for screening cryoprotectant proteins
 for cryopreservation of donor organs and biomaterials.
 """
 
+import os
 import streamlit as st
 import requests
 import pandas as pd
@@ -23,7 +24,7 @@ st.set_page_config(
 )
 
 # ============================================================
-# LANGUAGE: All text strings for both languages
+# LANGUAGE
 # ============================================================
 TEXTS = {
     "ru": {
@@ -399,7 +400,7 @@ TEXTS = {
 }
 
 # ============================================================
-# LANGUAGE SELECTOR (сначала!)
+# LANGUAGE SELECTOR
 # ============================================================
 if "lang" not in st.session_state:
     st.session_state.lang = "ru"
@@ -422,6 +423,16 @@ T = TEXTS[st.session_state.lang]
 
 @st.cache_data(ttl=3600)
 def fetch_uniprot_sequence(uniprot_id):
+    """Загружает последовательность из локального файла или UniProt."""
+    
+    filename = f"{uniprot_id}_cold.fasta"
+    if os.path.exists(filename):
+        try:
+            record = SeqIO.read(filename, "fasta")
+            return str(record.seq), record.description
+        except:
+            pass
+    
     url = f"https://rest.uniprot.org/uniprotkb/{uniprot_id}.fasta"
     try:
         response = requests.get(url, timeout=15)
@@ -430,8 +441,8 @@ def fetch_uniprot_sequence(uniprot_id):
             return str(record.seq), record.description
     except:
         pass
+    
     return None, None
-
 
 def analyze_properties(sequence):
     clean_seq = sequence.replace("*", "").upper()
@@ -582,7 +593,7 @@ st.title(T["title"])
 st.markdown(T["subtitle"])
 
 # ============================================================
-# SIDEBAR CONTENT (используем контейнеры для динамического обновления)
+# SIDEBAR CONTENT
 # ============================================================
 with st.sidebar:
     # Разделитель после переключателя языка
