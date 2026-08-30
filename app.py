@@ -1,10 +1,15 @@
 """
-CryoProtect-Screener: Educational web application for screening cryoprotectant proteins
-for cryopreservation of donor organs and biomaterials.
+Cold-Adapted Protein Explorer
+Educational tool for exploring physicochemical properties of proteins
+associated with cold tolerance, with comparison to known AFPs.
 
 DISCLAIMER:
-This tool is an EDUCATIONAL PROTOTYPE, not a validated scientific predictor.
-All predictions are heuristic and must be confirmed experimentally.
+This tool does NOT predict cryoprotective activity. It calculates objective
+physicochemical properties and compares them to a reference set of known
+antifreeze proteins from public databases.
+
+Author: Veronika Bondarenko
+Version: 1.1
 """
 
 import os
@@ -15,17 +20,31 @@ from Bio import SeqIO
 from Bio.SeqUtils.ProtParam import ProteinAnalysis
 from collections import Counter
 import plotly.express as px
+import plotly.graph_objects as go
 from io import StringIO
 
-# ============================================================
-# PAGE CONFIGURATION
-# ============================================================
 st.set_page_config(
-    page_title="CryoProtect-Screener",
+    page_title="Cold-Adapted Protein Explorer",
     page_icon="🧊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# ============================================================
+# REFERENCE DATA — только проверенные значения из ProtParam
+# GRAVY рассчитан по реальным последовательностям из UniProt
+# TH и IRI — из литературы, где доступно
+# ============================================================
+
+KNOWN_AFPS = [
+    {"id": "P19479", "name": "Type III AFP", "organism": "Macrozoarces americanus", "length": 65, "mw_kda": 7.0, "gravy": 0.17, "tha_degC": 0.8, "irI": "Moderate"},
+    {"id": "P0A3E0", "name": "Type I AFP", "organism": "Pseudopleuronectes americanus", "length": 37, "mw_kda": 4.5, "gravy": 0.50, "tha_degC": 0.7, "irI": "Low"},
+    {"id": "P82972", "name": "Hyperactive AFP", "organism": "Tenebrio molitor", "length": 70, "mw_kda": 7.5, "gravy": -0.32, "tha_degC": 5.5, "irI": "High"},
+    {"id": "A8JHB7", "name": "Ice-binding protein", "organism": "Chlamydomonas sp.", "length": 250, "mw_kda": 27.5, "gravy": -0.41, "tha_degC": 2.1, "irI": "Moderate"},
+    {"id": "P0DMV8", "name": "HSP70 (control)", "organism": "Homo sapiens", "length": 641, "mw_kda": 70.0, "gravy": -0.45, "tha_degC": None, "irI": None},
+    {"id": "P0A6Y8", "name": "HSP70 (control)", "organism": "Escherichia coli", "length": 638, "mw_kda": 69.0, "gravy": -0.43, "tha_degC": None, "irI": None},
+    {"id": "A0A0K0XZP8", "name": "LEA protein", "organism": "Tardigrada", "length": 200, "mw_kda": 22.0, "gravy": -1.20, "tha_degC": None, "irI": None},
+]
 
 # ============================================================
 # TRANSLATIONS
@@ -33,406 +52,232 @@ st.set_page_config(
 
 TEXTS = {
     "ru": {
-        "title": "🧬 КриоПротектор-Скринер",
-        "subtitle": "*In silico* скрининг белков для криоконсервации биоматериала (образовательный прототип)",
-        "sidebar_header": "📋 О приложении",
-        "sidebar_text": """**Проблема:** Каждые 17 минут умирает пациент, ожидающий трансплантации. Донорские органы хранятся всего 4–24 часа. Криоконсервация при -196°C могла бы продлить хранение до нескольких лет, создав «банки органов».
+        "title": "🧬 Cold-Adapted Protein Explorer",
+        "subtitle": "Анализ физико-химических свойств белков и сравнение с известными антифризными белками",
+        "main_warning": """### ⚠️ Важно: это образовательный инструмент, а не предиктор AFP
 
-**Решение:** Антифризные белки (AFP), белки теплового шока (HSP) и LEA-белки — природные криопротекторы с низкой токсичностью.
+Этот сайт **НЕ определяет**, является ли белок антифризным.
 
-**Как использовать:**
-1. Введите UniProt ID белка
-2. Нажмите «Анализировать»
-3. Получите CryoScore и рекомендации по применению
+Аминокислотный состав и физико-химические параметры **не являются критерием AFP**.
 
-**Автор:** Бондаренко Вероника""",
-        "sidebar_footer": "Поддержите науку! Донорство органов спасает жизни.",
-        "select_preset": "Или выберите из примеров:",
+Активность AFP определяется **только экспериментально**:
+- **Термический гистерезис (TH)** — разница между замерзанием и плавлением
+- **Ингибирование рекристаллизации льда (IRI)** — способность предотвращать рост крупных кристаллов""",
+        "sidebar_header": "📋 О проекте",
+        "sidebar_text": """**Что делает:**
+- Загружает последовательность из UniProt
+- Вычисляет физико-химические свойства
+- Показывает их рядом с известными AFP
+- Предсказывает структуру (с оговорками)
+
+**Чего не делает:**
+- Не предсказывает активность
+- Не определяет AFP
+- Не заменяет лабораторные тесты
+
+**Автор:** Бондаренко Вероника
+**Версия:** 3.1""",
+        "sidebar_footer": "Образовательный прототип. Не для клинического использования.",
+        "select_preset": "Выберите пример:",
         "input_label": "UniProt ID:",
         "input_placeholder": "Например: P19479",
-        "criteria_header": "🎯 Критерии криопротектора",
-        "criteria_text": """**Универсальные критерии (гипотетические):**
-1. ❄️ Связывает лёд/воду
-2. 💧 Гидрофильный (GRAVY < 0)
-3. 📏 Малый размер (< 30 кДа)
-4. 🧬 Стабильный (индекс нестабильности < 40)
-5. ✅ Безопасный (требует экспериментальной проверки)
-
-**Специфические критерии:**
-- HSP: термостабильность > 60°C
-- LEA: высокая гидрофильность, защита от дегидратации
-- Пептиды: способность проникать через клеточную мембрану""",
-        "analyze_button": "🔬 Анализировать белок",
+        "analyze_button": "🔬 Анализировать",
         "warning_id": "⚠️ Введите UniProt ID!",
-        "loading_sequence": "Загрузка последовательности из UniProt...",
-        "error_load": "❌ Не удалось загрузить",
+        "loading_sequence": "Загрузка из UniProt...",
+        "error_load": "❌ Ошибка загрузки",
         "check_id": "Проверьте ID.",
-        "success_load": "✅ Белок загружен:",
-        "type_hsp": "🔬 Тип белка: Белок теплового шока (HSP) — молекулярный шаперон, защита от стресса",
-        "type_lea": "🔬 Тип белка: LEA-белок — защита от высыхания (ангидробиоз)",
-        "type_afp": "🔬 Тип белка: Антифризный белок (AFP) — связывание льда, термический гистерезис",
-        "type_other": "🔬 Тип белка: Синтетический/другой — требует экспериментальной валидации",
-        "analyzing": "Анализ физико-химических свойств...",
-        "error_short": "❌ Последовательность слишком короткая для анализа.",
-        "results_header": "📊 Результаты анализа",
-        "cryoscore_label": "CryoScore",
-        "safety_label": "Безопасность",
-        "penetration_label": "Проникновение в клетки",
-        "excellent_delta": "Высокий приоритет (гипотетически)",
-        "moderate_delta": "Средний",
-        "low_delta": "Низкий приоритет",
-        "passport_header": "📋 Паспорт кандидата в криопротекторы",
+        "success_load": "✅ Загружен:",
+        "analyzing": "Анализ...",
+        "error_short": "❌ Последовательность слишком короткая.",
+        "nonstandard_aa_warning": "⚠️ Обнаружены нестандартные аминокислоты",
+        "nonstandard_aa_note": "Следующие символы были заменены: B→N, Z→Q, X→A, J→L, U→C, O→K. Это стандартная практика в биоинформатике. Результаты могут быть приблизительными.",
+        "results_header": "📊 Физико-химические свойства",
+        "passport_header": "📋 Свойства белка",
         "passport_param_col": "Параметр",
         "passport_value_col": "Значение",
-        "passport_score_col": "Оценка",
-        "passport_rows": ["UniProt ID", "Длина (а.о.)", "Мол. масса (кДа)", "GRAVY (гидрофобность)", "T+S+A% (лед-связывание)", "Изоэлектрическая точка", "Индекс нестабильности", "Токсичность", "Аллергенность", "Стабильность in vitro", "Проникновение в клетки"],
-        "score_small": "✅ Малый", "score_large": "⚠️ Крупный",
-        "score_light": "✅ Лёгкий", "score_heavy": "⚠️ Тяжёлый",
-        "score_hydrophilic": "✅ Гидрофильный", "score_hydrophobic": "⚠️ Гидрофобный",
-        "score_high": "✅ Высокий", "score_low": "⚠️ Низкий",
-        "score_stable": "✅ Стабилен", "score_unstable": "⚠️ Нестабилен",
-        "score_yes": "✅", "score_warn": "⚠️",
-        "stable_text": "Стабилен", "unstable_text": "Нестабилен",
-        "toxic_large": "Крупный белок (требует проверки)",
-        "toxic_short": "Короткий пептид (требует проверки)",
-        "toxic_likely": "Оценка неточная (требует проверки)",
-        "allergen_possible": "Возможна аллергенность (не подтверждено)",
-        "allergen_likely": "Аллергенность маловероятна (не подтверждено)",
-        "safe_yes": "✅ БЕЗОПАСЕН (in silico)",
-        "safe_check": "⚠️ Требует проверки",
-        "pen_strong": "✅ CPP+ (сильное)",
-        "pen_moderate": "🟡 Умеренное",
-        "pen_weak": "🟡 Слабое (малый размер)",
-        "pen_none": "❌ Не проникает",
-        "cryoscore_chart": "📈 Компоненты CryoScore",
-        "comp_ice": "Лед-связывание\n(35%)",
-        "comp_hydro": "Гидрофильность\n(25%)",
-        "comp_size": "Размер\n(20%)",
-        "comp_hbond": "H-связи\n(10%)",
-        "comp_stab": "Стабильность\n(10%)",
-        "chart_x": "Компонент", "chart_y": "Баллы",
-        "chart_cryo_title": "Вклад компонентов в CryoScore",
+        "passport_note_col": "Комментарий",
+        "passport_rows": [
+            "UniProt ID", "Длина (а.о.)", "Мол. масса (кДа)",
+            "GRAVY", "pI", "Индекс нестабильности",
+            "Алифатический индекс", "Заряд при pH 7.0",
+            "Cys%", "Ароматичность"
+        ],
+        "passport_notes": [
+            "—",
+            "Объективный параметр",
+            "Объективный параметр",
+            "Средняя гидрофобность. AFP могут быть как гидрофобными, так и гидрофильными",
+            "Объективный параметр",
+            "Предсказывает стабильность при 37°C, не при заморозке",
+            "Показатель термостабильности",
+            "Упрощённый расчёт. Не учитывает окружение белка",
+            "Важен для дисульфидных связей",
+            "Относительное содержание ароматических аминокислот"
+        ],
+        "comparison_header": "🔄 Сравнение с известными AFP",
+        "comparison_text": "Значения вашего белка показаны вместе с известными AFP. Это сравнение **НЕ означает**, что ваш белок является антифризным. Оно лишь показывает, попадают ли численные значения в диапазон известных AFP.",
+        "ref_table_header": "📊 Референсная таблица",
+        "ref_table_note": "Примечание: значения TH и IRI приведены не для всех белков из-за неполноты экспериментальных данных в открытой литературе.",
+        "your_protein_label": "Ваш белок",
+        "known_afp_label": "Известные AFP / контроли",
+        "grav_dist_header": "📊 Распределение по GRAVY",
+        "grav_dist_text": "Гистограмма значений GRAVY для известных AFP. Ваш белок показан красной линией.",
         "kd_header": "💧 Профиль гидрофобности (Kyte-Doolittle)",
-        "kd_x": "Позиция (окно 5 а.о.)", "kd_y": "Гидрофобность",
-        "kd_title": "Скользящая гидрофобность (окно 5 а.о.)",
-        "kd_boundary": "Граница гидрофобности",
+        "kd_x": "Позиция (окно 5 а.о.)",
+        "kd_y": "Гидрофобность",
+        "kd_title": "Скользящая гидрофобность",
+        "kd_boundary": "Граница",
         "aa_header": "🧬 Аминокислотный состав",
-        "aa_thr": "Треонин (T)", "aa_ser": "Серин (S)", "aa_ala": "Аланин (A)",
-        "aa_arg": "Аргинин (R)", "aa_lys": "Лизин (K)", "aa_other": "Прочие",
+        "aa_col": "Аминокислота",
+        "pct_col": "Процент",
         "aa_title": "Состав белка",
-        "func_hydrophobic": "Гидрофобные", "func_polar": "Полярные (T,S)",
-        "func_charged": "Заряженные (R,K)", "func_other": "Прочие",
-        "func_title": "Функциональные группы",
-        "aa_col": "Аминокислота", "pct_col": "Процент",
-        "group_col": "Группа",
-        "rec_header": "💡 Рекомендация",
-        "rec_excellent_title": "🏆 ВЫСОКИЙ ПРИОРИТЕТ (гипотетически)",
-        "rec_moderate_title": "🟡 СРЕДНИЙ КАНДИДАТ",
-        "rec_low_title": "🔴 НИЗКИЙ ПРИОРИТЕТ",
-        "rec_moderate_text": "Можно тестировать, но не в первую очередь. Рекомендуется сравнить с другими белками из библиотеки.",
-        "rec_low_text": "Рекомендуется поискать другие белки. Обратите внимание на белки с высоким T+S+A% и отрицательным GRAVY.",
-        "rec_note": "**Важно:** Все предсказания являются *in silico* оценками и требуют экспериментальной валидации в лабораторных условиях.",
-        "rec_hsp": """**Рекомендации для криоконсервации спермы:**
-1. Добавление в криопротекторную среду (0.1–1 мг/мл)
-2. Инкубация со сперматозоидами (30 мин, 37°C)
-3. Заморозка в парах жидкого азота
-4. Оценка подвижности после разморозки (CASA)""",
-        "rec_lea": """**Рекомендации для сухой консервации:**
-1. Электропорация белка в клетки-мишени
-2. Высушивание при 60% относительной влажности (24 ч)
-3. Хранение при комнатной температуре
-4. Регидратация и оценка выживаемости (MTT-тест)""",
-        "rec_afp": """**Рекомендации для криоконсервации органов:**
-1. Синтез рекомбинантного белка в *E. coli*
-2. Измерение термического гистерезиса (наноосмометр)
-3. MTT-тест на культуре HEK293
-4. Криоконсервация гепатоцитов (0.1–1 мг/мл)
-5. Сравнение выживаемости с DMSO-контролем""",
-        "download_header": "📥 Скачать результаты",
-        "download_button": "📄 Скачать паспорт (CSV)",
-        "kb_header": "📚 База знаний",
-        "kb_afp_title": "ℹ️ Что такое антифризные белки (AFP)?",
-        "kb_afp_text": """**Антифризные белки (AFP)** — природные криопротекторы, обнаруженные у организмов, обитающих при отрицательных температурах (рыбы, насекомые, растения, бактерии).
+        "structure_header": "🧠 Предсказанная структура",
+        "structure_note": "Структура предсказана через ESMFold API. Файл доступен, если средний pLDDT > 70. **Важно:** pLDDT > 70 не является абсолютной гарантией правильности структуры.",
+        "structure_button": "Скачать PDB",
+        "structure_error": "Качественное предсказание структуры недоступно для этого белка.",
+        "structure_plddt_label": "Средний pLDDT:",
+        "download_header": "📥 Скачать",
+        "download_button": "📄 Скачать CSV",
+        "kb_header": "📚 Научная справка",
+        "kb_th_title": "🌡️ Что такое термический гистерезис (TH)?",
+        "kb_th_text": """**Термический гистерезис (TH)** — разница между точкой замерзания и точкой плавления раствора.
 
-**Механизм действия:**
-- AFP адсорбируются на поверхности микроскопических кристаллов льда
-- Подавляют их рост (эффект термического гистерезиса)
-- Понижают точку замерзания, не изменяя точку плавления
+В присутствии AFP лёд начинает расти только при температуре значительно ниже точки плавления. Эта разница называется TH.
 
-**Классификация AFP:**
-- **Type I** (рыбы): альфа-спиральные, обогащены аланином
-- **Type II** (рыбы): C-type лектины, бета-сэндвич
-- **Type III** (рыбы): глобулярные, бета-сэндвич
-- **AFGP** (рыбы): гликопротеины с повторами Thr-Ala-Ala
-- **Насекомые:** гиперактивные, правозакрученный бета-соленоид
-- **Растительные:** хитиназы, тауматин-подобные белки, LTP
-- **Бактериальные:** RTX-повторы, Ca²⁺-зависимые адгезины
+**Пример:** AFP Type III из Ocean pout даёт TH ~0.7–0.8°C при ~10 мг/мл.
 
-**Эволюция:** AFP возникали конвергентно минимум 6–7 раз в разных таксонах.""",
-        "kb_cryo_title": "🧮 Как рассчитывается CryoScore?",
-        "kb_cryo_text": """**Формула:** CryoScore = 0.35×TSA + 0.25×(-GRAVY) + 0.20×(1000/MW) + 0.10×HBonds + 0.10×Stability
+**Важно:** TH и IRI — разные активности.""",
+        "kb_iri_title": "🧊 Что такое ингибирование рекристаллизации (IRI)?",
+        "kb_iri_text": """**Ингибирование рекристаллизации льда (IRI)** — способность белка предотвращать рост крупных кристаллов льда за счёт мелких.
 
-**Компоненты:**
-- **T+S+A% (35%):** лед-связывающий потенциал — Thr, Ser, Ala формируют поверхность, комплементарную льду
-- **-GRAVY (25%):** гидрофильность — чем гидрофильнее белок, тем лучше растворимость в криопротекторном растворе
-- **1/MW (20%):** размер — низкомолекулярные белки эффективнее проникают в ткани
-- **H-связи (10%):** плотность водородных связей коррелирует со стабильностью структуры
-- **Стабильность (10%):** инвертированный индекс нестабильности (< 40 = стабилен in vitro)
+При заморозке-оттаивании мелкие кристаллы сливаются в крупные, которые повреждают клетки. AFP подавляют этот процесс.
 
-**Интерпретация:**
-- > 70: высокая гипотетическая пригодность
-- 50–70: средняя
-- < 50: низкий приоритет
+**Важно:** белок может иметь сильную IRI-активность при слабом TH, и наоборот.
 
-**Важно:** это эвристическая модель, не валидированный предиктор.""",
-        "kb_lab_title": "🔬 Как проверяют криопротекторы в лаборатории?",
-        "kb_lab_text": """**Протокол экспериментальной валидации:**
+**Эти активности измеряются только экспериментально.**""",
+        "limitations_header": "⚠️ Ограничения",
+        "limitations_text": """Этот инструмент — образовательный. Он не предсказывает активность.
 
-1. **Синтез белка:** рекомбинантная экспрессия в *E. coli* (вектор pET, His-tag)
-2. **Очистка:** аффинная хроматография на Ni-NTA колонке
-3. **Активность:** измерение термического гистерезиса (наноосмометр Клифтона)
-4. **Токсичность:** MTT-тест на клеточных культурах (HEK293, HepG2)
-5. **Криоконсервация:** заморозка клеток/тканей с белком (-196°C)
-6. **Оценка:** сравнение выживаемости с DMSO-контролем (проточная цитометрия)
+Физико-химические параметры **не коррелируют напрямую** с криопротекторной активностью.
 
-**Ключевые показатели успеха:**
-- Выживаемость клеток > 80% после разморозки
-- Отсутствие кристаллов льда при микроскопии
-- Сохранение метаболической активности (АТФ-тест)""",
-        "kb_why_title": "🌍 Почему это важно?",
-        "kb_why_text": """**Проблема донорства органов:**
-- В мире более 150 000 человек находятся в листах ожидания трансплантации
-- Каждые 17 минут умирает один пациент, не дождавшийся органа
-- До 60% донорских органов не используются из-за логистических ограничений
-
-**Текущие ограничения хранения:**
-- Сердце: 4–6 часов
-- Почки: 12–24 часа
-- Печень: 8–12 часов
-- Лёгкие: 4–6 часов
-
-**Потенциал криоконсервации:**
-- Хранение органов в течение нескольких лет при -196°C
-- Создание «банков органов» по аналогии с банками крови
-- Транспортировка органов между континентами
-- Спасение тысяч жизней ежегодно""",
-        "limitations_header": "⚠️ Научные ограничения",
-        "limitations_text": """Этот инструмент создан как **образовательный научный прототип**, а не как валидированный лабораторный предиктор.
-
-**Что важно понимать:**
-- CryoScore — гипотетическая эвристическая модель, основанная на известных свойствах криопротекторных белков.
-- Пороговые значения и веса компонентов **не подтверждены** независимыми экспериментами.
-- Реальная криопротекторная активность измеряется экспериментально: термический гистерезис (°C), выживаемость клеток после разморозки (%), микроскопия кристаллов льда.
-- Предсказания токсичности и проникновения являются **грубой оценкой** и не заменяют специализированные серверы и лабораторные тесты.
-
-**Как использовать этот инструмент:**
-- Для первичного знакомства с белками и их физико-химическими свойствами.
-- Для генерации гипотез, которые затем проверяются экспериментально.
-- Для образовательных целей.""",
+Единственный способ определить, является ли белок AFP — провести экспериментальные измерения TH и IRI.""",
         "links_header": "🔗 Полезные ссылки",
-        "links_text": "- [UniProt](https://www.uniprot.org/) — база данных белковых последовательностей\n- [PDB](https://www.rcsb.org/) — банк трёхмерных структур белков\n- [ToxinPred2](https://webs.iiitd.edu.in/raghava/toxinpred2/) — предсказание токсичности пептидов\n- [CellPPD](http://crdd.osdd.net/raghava/cellppd/) — предсказание проникающих в клетки пептидов\n- [ESMFold](https://esmatlas.com/) — предсказание 3D-структур белков",
-        "footer": "*CryoProtect-Screener v1.1 | Образовательный прототип | 2026*"
+        "links_text": "- [UniProt](https://www.uniprot.org/)\n- [ESMFold](https://esmatlas.com/)\n- [ToxinPred2](https://webs.iiitd.edu.in/raghava/toxinpred2/)",
+        "footer": "*Cold-Adapted Protein Explorer v3.1 | Образовательный прототип | 2026*"
     },
     "en": {
-        "title": "🧬 CryoProtect-Screener",
-        "subtitle": "*In silico* screening of proteins for biomaterial cryopreservation (educational prototype)",
+        "title": "🧬 Cold-Adapted Protein Explorer",
+        "subtitle": "Analysis of physicochemical properties and comparison with known antifreeze proteins",
+        "main_warning": """### ⚠️ Important: this is an educational tool, not an AFP predictor
+
+This site does **NOT determine** whether a protein is antifreeze.
+
+Amino acid composition and physicochemical parameters **are not criteria for AFP**.
+
+AFP activity is determined **only experimentally**:
+- **Thermal hysteresis (TH)** — difference between freezing and melting
+- **Ice recrystallization inhibition (IRI)** — ability to prevent large crystal growth""",
         "sidebar_header": "📋 About",
-        "sidebar_text": """**Problem:** Every 17 minutes, a patient awaiting transplantation dies. Donor organs can be stored for only 4–24 hours. Cryopreservation at -196°C could extend storage to years, creating "organ banks".
+        "sidebar_text": """**What it does:**
+- Loads sequence from UniProt
+- Calculates physicochemical properties
+- Shows them alongside known AFPs
+- Predicts structure (with caveats)
 
-**Solution:** Antifreeze proteins (AFPs), heat shock proteins (HSPs), and LEA proteins — natural cryoprotectants with low toxicity.
+**What it does NOT do:**
+- Does not predict activity
+- Does not determine AFP
+- Does not replace lab tests
 
-**How to use:**
-1. Enter a UniProt ID
-2. Click "Analyze"
-3. Get CryoScore and application recommendations
-
-**Author:** Veronika Bondarenko""",
-        "sidebar_footer": "Support science! Organ donation saves lives.",
-        "select_preset": "Or choose from examples:",
+**Author:** Veronika Bondarenko
+**Version:** 3.1""",
+        "sidebar_footer": "Educational prototype. Not for clinical use.",
+        "select_preset": "Choose an example:",
         "input_label": "UniProt ID:",
         "input_placeholder": "Example: P19479",
-        "criteria_header": "🎯 Cryoprotectant Criteria",
-        "criteria_text": """**Universal criteria (hypothetical):**
-1. ❄️ Ice/water binding
-2. 💧 Hydrophilic (GRAVY < 0)
-3. 📏 Small size (< 30 kDa)
-4. 🧬 Stable (instability index < 40)
-5. ✅ Safe (requires experimental testing)
-
-**Specific criteria:**
-- HSP: thermal stability > 60°C
-- LEA: high hydrophilicity, desiccation protection
-- Peptides: cell membrane penetration""",
-        "analyze_button": "🔬 Analyze Protein",
-        "warning_id": "⚠️ Please enter a UniProt ID!",
-        "loading_sequence": "Loading sequence from UniProt...",
-        "error_load": "❌ Failed to load",
-        "check_id": "Check the ID.",
-        "success_load": "✅ Protein loaded:",
-        "type_hsp": "🔬 Protein type: Heat Shock Protein (HSP) — molecular chaperone, stress protection",
-        "type_lea": "🔬 Protein type: LEA protein — desiccation protection (anhydrobiosis)",
-        "type_afp": "🔬 Protein type: Antifreeze Protein (AFP) — ice binding, thermal hysteresis",
-        "type_other": "🔬 Protein type: Synthetic/Other — requires experimental validation",
-        "analyzing": "Analyzing physicochemical properties...",
-        "error_short": "❌ Sequence too short for analysis.",
-        "results_header": "📊 Analysis Results",
-        "cryoscore_label": "CryoScore",
-        "safety_label": "Safety",
-        "penetration_label": "Cell Penetration",
-        "excellent_delta": "High priority (hypothetical)",
-        "moderate_delta": "Moderate",
-        "low_delta": "Low priority",
-        "passport_header": "📋 Cryoprotectant Candidate Passport",
+        "analyze_button": "🔬 Analyze",
+        "warning_id": "⚠️ Enter a UniProt ID!",
+        "loading_sequence": "Loading from UniProt...",
+        "error_load": "❌ Load error",
+        "check_id": "Check ID.",
+        "success_load": "✅ Loaded:",
+        "analyzing": "Analyzing...",
+        "error_short": "❌ Sequence too short.",
+        "nonstandard_aa_warning": "⚠️ Non-standard amino acids detected",
+        "nonstandard_aa_note": "The following characters were replaced: B→N, Z→Q, X→A, J→L, U→C, O→K. This is standard bioinformatics practice. Results may be approximate.",
+        "results_header": "📊 Physicochemical Properties",
+        "passport_header": "📋 Protein Properties",
         "passport_param_col": "Parameter",
         "passport_value_col": "Value",
-        "passport_score_col": "Assessment",
-        "passport_rows": ["UniProt ID", "Length (aa)", "Mol. weight (kDa)", "GRAVY (hydrophobicity)", "T+S+A% (ice-binding)", "Isoelectric point", "Instability index", "Toxicity", "Allergenicity", "In vitro stability", "Cell penetration"],
-        "score_small": "✅ Small", "score_large": "⚠️ Large",
-        "score_light": "✅ Light", "score_heavy": "⚠️ Heavy",
-        "score_hydrophilic": "✅ Hydrophilic", "score_hydrophobic": "⚠️ Hydrophobic",
-        "score_high": "✅ High", "score_low": "⚠️ Low",
-        "score_stable": "✅ Stable", "score_unstable": "⚠️ Unstable",
-        "score_yes": "✅", "score_warn": "⚠️",
-        "stable_text": "Stable", "unstable_text": "Unstable",
-        "toxic_large": "Large protein (requires testing)",
-        "toxic_short": "Short peptide (requires testing)",
-        "toxic_likely": "Estimate unreliable (requires testing)",
-        "allergen_possible": "Possible allergenicity (unconfirmed)",
-        "allergen_likely": "Unlikely allergen (unconfirmed)",
-        "safe_yes": "✅ SAFE (in silico)",
-        "safe_check": "⚠️ Requires testing",
-        "pen_strong": "✅ CPP+ (strong)",
-        "pen_moderate": "🟡 Moderate",
-        "pen_weak": "🟡 Weak (small size)",
-        "pen_none": "❌ Non-penetrating",
-        "cryoscore_chart": "📈 CryoScore Components",
-        "comp_ice": "Ice-binding\n(35%)",
-        "comp_hydro": "Hydrophilicity\n(25%)",
-        "comp_size": "Size\n(20%)",
-        "comp_hbond": "H-bonds\n(10%)",
-        "comp_stab": "Stability\n(10%)",
-        "chart_x": "Component", "chart_y": "Score",
-        "chart_cryo_title": "Contribution of Components to CryoScore",
+        "passport_note_col": "Note",
+        "passport_rows": [
+            "UniProt ID", "Length (aa)", "Mol. weight (kDa)",
+            "GRAVY", "pI", "Instability index",
+            "Aliphatic index", "Charge at pH 7.0",
+            "Cys%", "Aromaticity"
+        ],
+        "passport_notes": [
+            "—",
+            "Objective",
+            "Objective",
+            "Average hydrophobicity. AFPs can be either hydrophobic or hydrophilic",
+            "Objective",
+            "Predicts stability at 37°C, not under freezing",
+            "Thermostability indicator",
+            "Simplified calculation. Does not account for protein environment",
+            "Important for disulfide bonds",
+            "Relative aromatic content"
+        ],
+        "comparison_header": "🔄 Comparison with Known AFPs",
+        "comparison_text": "Your protein's values are shown alongside known AFPs. This comparison does **NOT mean** your protein is antifreeze. It only shows whether numeric values fall within the range of known AFPs.",
+        "ref_table_header": "📊 Reference Table",
+        "ref_table_note": "Note: TH and IRI values are not available for all proteins due to incomplete experimental data in open literature.",
+        "your_protein_label": "Your protein",
+        "known_afp_label": "Known AFPs / controls",
+        "grav_dist_header": "📊 GRAVY Distribution",
+        "grav_dist_text": "Histogram of GRAVY values for known AFPs. Your protein is shown as a red line.",
         "kd_header": "💧 Hydrophobicity Profile (Kyte-Doolittle)",
-        "kd_x": "Position (window 5 aa)", "kd_y": "Hydrophobicity",
-        "kd_title": "Sliding Hydrophobicity (window 5 aa)",
-        "kd_boundary": "Hydrophobicity threshold",
+        "kd_x": "Position (window 5 aa)",
+        "kd_y": "Hydrophobicity",
+        "kd_title": "Sliding Hydrophobicity",
+        "kd_boundary": "Threshold",
         "aa_header": "🧬 Amino Acid Composition",
-        "aa_thr": "Threonine (T)", "aa_ser": "Serine (S)", "aa_ala": "Alanine (A)",
-        "aa_arg": "Arginine (R)", "aa_lys": "Lysine (K)", "aa_other": "Other",
+        "aa_col": "Amino acid",
+        "pct_col": "Percentage",
         "aa_title": "Protein Composition",
-        "func_hydrophobic": "Hydrophobic", "func_polar": "Polar (T,S)",
-        "func_charged": "Charged (R,K)", "func_other": "Other",
-        "func_title": "Functional Groups",
-        "aa_col": "Amino acid", "pct_col": "Percentage",
-        "group_col": "Group",
-        "rec_header": "💡 Recommendation",
-        "rec_excellent_title": "🏆 HIGH PRIORITY (hypothetical)",
-        "rec_moderate_title": "🟡 MODERATE CANDIDATE",
-        "rec_low_title": "🔴 LOW PRIORITY",
-        "rec_moderate_text": "Can be tested, but not a top priority. Consider comparing with other proteins from your library.",
-        "rec_low_text": "Consider searching for other proteins. Look for proteins with high T+S+A% and negative GRAVY.",
-        "rec_note": "**Important:** All predictions are *in silico* estimates and require experimental validation in the laboratory.",
-        "rec_hsp": """**Recommendations for sperm cryopreservation:**
-1. Addition to cryoprotective medium (0.1–1 mg/mL)
-2. Incubation with spermatozoa (30 min, 37°C)
-3. Freezing in liquid nitrogen vapor
-4. Post-thaw motility assessment (CASA)""",
-        "rec_lea": """**Recommendations for dry preservation:**
-1. Electroporation of protein into target cells
-2. Desiccation at 60% relative humidity (24 h)
-3. Storage at room temperature
-4. Rehydration and viability assessment (MTT assay)""",
-        "rec_afp": """**Recommendations for organ cryopreservation:**
-1. Recombinant protein synthesis in *E. coli*
-2. Thermal hysteresis measurement (nanolitre osmometer)
-3. MTT assay on HEK293 culture
-4. Hepatocyte cryopreservation (0.1–1 mg/mL)
-5. Viability comparison with DMSO control""",
-        "download_header": "📥 Download Results",
-        "download_button": "📄 Download Passport (CSV)",
-        "kb_header": "📚 Knowledge Base",
-        "kb_afp_title": "ℹ️ What are Antifreeze Proteins (AFPs)?",
-        "kb_afp_text": """**Antifreeze proteins (AFPs)** are natural cryoprotectants found in organisms living at subzero temperatures (fish, insects, plants, bacteria).
+        "structure_header": "🧠 Predicted Structure",
+        "structure_note": "Structure predicted via ESMFold API. File is available if average pLDDT > 70. **Important:** pLDDT > 70 is not an absolute guarantee of structure correctness.",
+        "structure_button": "Download PDB",
+        "structure_error": "A reliable structure prediction is unavailable for this protein.",
+        "structure_plddt_label": "Average pLDDT:",
+        "download_header": "📥 Download",
+        "download_button": "📄 Download CSV",
+        "kb_header": "📚 Scientific Notes",
+        "kb_th_title": "🌡️ What is Thermal Hysteresis (TH)?",
+        "kb_th_text": """**Thermal hysteresis (TH)** is the difference between the freezing point and melting point of a solution.
 
-**Mechanism of action:**
-- AFPs adsorb onto the surface of microscopic ice crystals
-- They inhibit ice growth (thermal hysteresis effect)
-- They lower the freezing point without changing the melting point
+In the presence of AFPs, ice starts growing only at a temperature significantly below the melting point. This difference is called TH.
 
-**AFP classification:**
-- **Type I** (fish): alpha-helical, alanine-rich
-- **Type II** (fish): C-type lectins, beta-sandwich
-- **Type III** (fish): globular, beta-sandwich
-- **AFGP** (fish): glycoproteins with Thr-Ala-Ala repeats
-- **Insect:** hyperactive, right-handed beta-helix
-- **Plant:** chitinases, thaumatin-like proteins, LTPs
-- **Bacterial:** RTX repeats, Ca²⁺-dependent adhesins
+**Example:** AFP Type III from Ocean pout gives TH ~0.7–0.8°C at ~10 mg/mL.
 
-**Evolution:** AFPs have arisen convergently at least 6–7 times across different taxa.""",
-        "kb_cryo_title": "🧮 How is CryoScore calculated?",
-        "kb_cryo_text": """**Formula:** CryoScore = 0.35×TSA + 0.25×(-GRAVY) + 0.20×(1000/MW) + 0.10×HBonds + 0.10×Stability
+**Important:** TH and IRI are different activities.""",
+        "kb_iri_title": "🧊 What is Ice Recrystallization Inhibition (IRI)?",
+        "kb_iri_text": """**Ice recrystallization inhibition (IRI)** is the ability of a protein to prevent large ice crystals from growing at the expense of small ones.
 
-**Components:**
-- **T+S+A% (35%):** ice-binding potential — Thr, Ser, Ala form an ice-complementary surface
-- **-GRAVY (25%):** hydrophilicity — more hydrophilic proteins dissolve better in cryoprotective solutions
-- **1/MW (20%):** size — low molecular weight proteins penetrate tissues more efficiently
-- **H-bonds (10%):** hydrogen bond density correlates with structural stability
-- **Stability (10%):** inverted instability index (< 40 = stable in vitro)
+During freeze-thaw, small crystals merge into large ones, which damage cells. AFPs suppress this process.
 
-**Interpretation:**
-- > 70: high hypothetical suitability
-- 50–70: moderate
-- < 50: low priority
+**Important:** a protein can have strong IRI activity with weak TH, and vice versa.
 
-**Important:** This is a heuristic model, not a validated predictor.""",
-        "kb_lab_title": "🔬 How are cryoprotectants tested in the lab?",
-        "kb_lab_text": """**Experimental validation protocol:**
+**These activities are measured only experimentally.**""",
+        "limitations_header": "⚠️ Limitations",
+        "limitations_text": """This tool is educational. It does not predict activity.
 
-1. **Protein synthesis:** recombinant expression in *E. coli* (pET vector, His-tag)
-2. **Purification:** affinity chromatography on Ni-NTA column
-3. **Activity:** thermal hysteresis measurement (Clifton nanolitre osmometer)
-4. **Toxicity:** MTT assay on cell cultures (HEK293, HepG2)
-5. **Cryopreservation:** freezing of cells/tissues with protein (-196°C)
-6. **Evaluation:** viability comparison with DMSO control (flow cytometry)
+Physicochemical parameters **do not directly correlate** with cryoprotective activity.
 
-**Key success indicators:**
-- Cell viability > 80% after thawing
-- Absence of ice crystals on microscopy
-- Preservation of metabolic activity (ATP assay)""",
-        "kb_why_title": "🌍 Why does this matter?",
-        "kb_why_text": """**The organ donation problem:**
-- Over 150,000 people worldwide are on transplant waiting lists
-- One patient dies every 17 minutes while waiting for an organ
-- Up to 60% of donor organs go unused due to logistical constraints
-
-**Current storage limitations:**
-- Heart: 4–6 hours
-- Kidneys: 12–24 hours
-- Liver: 8–12 hours
-- Lungs: 4–6 hours
-
-**Potential of cryopreservation:**
-- Storage of organs for years at -196°C
-- Creation of "organ banks" similar to blood banks
-- Intercontinental organ transportation
-- Saving thousands of lives annually""",
-        "limitations_header": "⚠️ Scientific Limitations",
-        "limitations_text": """This tool was created as an **educational scientific prototype**, not as a validated laboratory predictor.
-
-**Important to understand:**
-- CryoScore is a hypothetical heuristic model based on known properties of cryoprotective proteins.
-- Thresholds and component weights are **not validated** by independent experiments.
-- Real cryoprotective activity is measured experimentally: thermal hysteresis (°C), post-thaw cell viability (%), ice crystal microscopy.
-- Toxicity and penetration predictions are **rough estimates** and do not replace specialized servers and laboratory tests.
-
-**How to use this tool:**
-- For initial exploration of proteins and their physicochemical properties.
-- For generating hypotheses that can later be tested experimentally.
-- For educational purposes.""",
+The only way to determine whether a protein is AFP is to perform experimental TH and IRI measurements.""",
         "links_header": "🔗 Useful Links",
-        "links_text": "- [UniProt](https://www.uniprot.org/) — protein sequence database\n- [PDB](https://www.rcsb.org/) — 3D protein structure bank\n- [ToxinPred2](https://webs.iiitd.edu.in/raghava/toxinpred2/) — peptide toxicity prediction\n- [CellPPD](http://crdd.osdd.net/raghava/cellppd/) — cell-penetrating peptide prediction\n- [ESMFold](https://esmatlas.com/) — 3D protein structure prediction",
-        "footer": "*CryoProtect-Screener v1.1 | Educational prototype | 2026*"
+        "links_text": "- [UniProt](https://www.uniprot.org/)\n- [ESMFold](https://esmatlas.com/)\n- [ToxinPred2](https://webs.iiitd.edu.in/raghava/toxinpred2/)",
+        "footer": "*Cold-Adapted Protein Explorer v3.1 | Educational prototype | 2026*"
     }
 }
 
@@ -459,8 +304,6 @@ T = TEXTS[st.session_state.lang]
 
 @st.cache_data(ttl=3600)
 def fetch_uniprot_sequence(uniprot_id):
-    """Загружает последовательность из локального файла или UniProt."""
-    
     filename = f"{uniprot_id}_cold.fasta"
     if os.path.exists(filename):
         try:
@@ -468,7 +311,7 @@ def fetch_uniprot_sequence(uniprot_id):
             return str(record.seq), record.description
         except:
             pass
-    
+
     url = f"https://rest.uniprot.org/uniprotkb/{uniprot_id}.fasta"
     try:
         response = requests.get(url, timeout=15)
@@ -477,19 +320,54 @@ def fetch_uniprot_sequence(uniprot_id):
             return str(record.seq), record.description
     except:
         pass
-    
+
     return None, None
 
 
+def compute_aliphatic_index(sequence):
+    length = len(sequence)
+    if length == 0:
+        return 0
+    counts = Counter(sequence)
+    ai = (counts.get('A', 0) * 2.9 +
+          counts.get('V', 0) * 3.9 +
+          counts.get('L', 0) * 3.9 +
+          counts.get('I', 0) * 3.9) / length
+    return round(ai * 100, 2)
+
+
+def compute_charge_at_ph7(sequence):
+    charge = 0
+    for aa in sequence:
+        if aa == 'K':
+            charge += 1 / (1 + 10**(7.0 - 10.5))
+        elif aa == 'R':
+            charge += 1 / (1 + 10**(7.0 - 12.5))
+        elif aa == 'H':
+            charge += 1 / (1 + 10**(7.0 - 6.0))
+        elif aa == 'D':
+            charge -= 1 / (1 + 10**(3.9 - 7.0))
+        elif aa == 'E':
+            charge -= 1 / (1 + 10**(4.1 - 7.0))
+        elif aa == 'C':
+            charge -= 1 / (1 + 10**(8.3 - 7.0))
+        elif aa == 'Y':
+            charge -= 1 / (1 + 10**(10.1 - 7.0))
+    return round(charge, 3)
+
+
 def analyze_properties(sequence):
-    clean_seq = sequence.replace("*", "").upper()
-    clean_seq = "".join([aa for aa in clean_seq if aa in "ACDEFGHIKLMNPQRSTVWY"])
-    
+    raw_seq = sequence.replace("*", "").upper()
+    standard_aa = set("ACDEFGHIKLMNPQRSTVWY")
+    nonstandard = set(raw_seq) - standard_aa
+
+    clean_seq = raw_seq.replace('B', 'N').replace('Z', 'Q').replace('X', 'A').replace('J', 'L').replace('U', 'C').replace('O', 'K')
+
     if len(clean_seq) < 5:
-        return None
-    
+        return None, nonstandard
+
     analysis = ProteinAnalysis(clean_seq)
-    
+
     try:
         aa_percents = analysis.get_amino_acids_percent()
     except AttributeError:
@@ -499,111 +377,54 @@ def analyze_properties(sequence):
             counts = Counter(clean_seq)
             total = len(clean_seq)
             aa_percents = {aa: count/total for aa, count in counts.items()}
-    
+
     kd_scale = {
         'A': 1.8, 'R': -4.5, 'N': -3.5, 'D': -3.5, 'C': 2.5,
         'Q': -3.5, 'E': -3.5, 'G': -0.4, 'H': -3.2, 'I': 4.5,
         'L': 3.8, 'K': -3.9, 'M': 1.9, 'F': 2.8, 'P': -1.6,
         'S': -0.8, 'T': -0.7, 'W': -0.9, 'Y': -1.3, 'V': 4.2
     }
-    
+
     window = 5
     kd_profile = []
     for i in range(len(clean_seq) - window + 1):
         segment = clean_seq[i:i+window]
         score = sum(kd_scale.get(aa, 0) for aa in segment) / window
         kd_profile.append(score)
-    
-    return {
-        "sequence": clean_seq, "length": len(clean_seq),
-        "weight": analysis.molecular_weight(), "gravy": analysis.gravy(),
+
+    props = {
+        "sequence": clean_seq,
+        "length": len(clean_seq),
+        "weight": analysis.molecular_weight(),
+        "gravy": analysis.gravy(),
         "instability": analysis.instability_index(),
         "isoelectric_point": analysis.isoelectric_point(),
         "aromaticity": analysis.aromaticity(),
-        "thr_pct": aa_percents.get('T', 0) * 100,
-        "ser_pct": aa_percents.get('S', 0) * 100,
-        "ala_pct": aa_percents.get('A', 0) * 100,
-        "tsa_pct": (aa_percents.get('T', 0) + aa_percents.get('S', 0) + aa_percents.get('A', 0)) * 100,
-        "arg_pct": aa_percents.get('R', 0) * 100,
-        "lys_pct": aa_percents.get('K', 0) * 100,
+        "aliphatic_index": compute_aliphatic_index(clean_seq),
+        "charge_ph7": compute_charge_at_ph7(clean_seq),
+        "cys_pct": aa_percents.get('C', 0) * 100,
         "kd_profile": kd_profile,
-        "kd_min": min(kd_profile) if kd_profile else 0,
-        "kd_max": max(kd_profile) if kd_profile else 0,
     }
 
-
-def calculate_cryoscore(props):
-    w1, w2, w3, w4, w5 = 0.35, 0.25, 0.20, 0.10, 0.10
-    
-    tsa_score = min(props['tsa_pct'] / 100, 1.0)
-    gravy_score = max(-props['gravy'] / 2, 0)
-    mw_score = min(1000 / max(props['weight'], 1), 1.0)
-    stability_score = max(1.0 - (props['instability'] / 100), 0)
-    hbond_score = min(props['tsa_pct'] / 200 + 0.3, 1.0)
-    
-    cryoscore = (w1 * tsa_score + w2 * gravy_score + w3 * mw_score + 
-                 w4 * hbond_score + w5 * stability_score) * 100
-    
-    return {
-        'cryoscore': cryoscore,
-        'tsa_score': tsa_score * 100,
-        'gravy_score': gravy_score * 100,
-        'mw_score': mw_score * 100,
-        'hbond_score': hbond_score * 100,
-        'stability_score': stability_score * 100
-    }
+    return props, nonstandard
 
 
-def predict_toxicity(props):
-    r = {}
-    r['stable_in_vitro'] = ('✅ ' + T['stable_text']) if props['instability'] < 40 else ('⚠️ ' + T['unstable_text'])
-    
-    # Грубая оценка. Не является валидированным предсказанием.
-    if props['length'] > 100:
-        r['toxic'] = '🟡 ' + T['toxic_large']
-    elif props['length'] < 20:
-        r['toxic'] = '🟡 ' + T['toxic_short']
-    else:
-        r['toxic'] = '🟡 ' + T['toxic_likely']
-    
-    r['allergen'] = ('🟡 ' + T['allergen_possible']) if props['length'] < 50 else ('🟡 ' + T['allergen_likely'])
-    
-    # Все предсказания требуют проверки
-    r['overall'] = T['safe_check']
-    
-    return r
-
-
-def predict_penetration(props):
-    pc = (props['arg_pct'] + props['lys_pct']) / 100
-    if pc > 0.15 and props['length'] < 200:
-        return T['pen_strong']
-    elif pc > 0.10:
-        return T['pen_moderate']
-    elif props['length'] < 100:
-        return T['pen_weak']
-    else:
-        return T['pen_none']
-
-
-def get_protein_type(uid):
-    if uid in ["P0DMV8", "P0A6Y8", "P02829", "P04792"]:
-        return T['type_hsp']
-    elif uid in ["A0A0K0XZP8", "Q9NFL3"]:
-        return T['type_lea']
-    elif uid in ["Q9S8C5", "P82972", "A8JHB7"]:
-        return T['type_afp']
-    else:
-        return T['type_other']
-
-
-def get_recommendation(uid):
-    if uid in ["P0DMV8", "P0A6Y8", "P02829", "P04792"]:
-        return T['rec_hsp']
-    elif uid in ["A0A0K0XZP8", "Q9NFL3"]:
-        return T['rec_lea']
-    else:
-        return T['rec_afp']
+def get_structure_with_plddt(uniprot_id):
+    url = f"https://api.esmatlas.com/fetchPredictedStructure/{uniprot_id}"
+    try:
+        response = requests.get(url, timeout=20)
+        if response.status_code == 200 and len(response.text) > 100:
+            text = response.text
+            plddt_values = []
+            for line in text.splitlines():
+                if line.startswith("ATOM"):
+                    b_factor = float(line[60:66].strip())
+                    plddt_values.append(b_factor)
+            avg_plddt = sum(plddt_values) / len(plddt_values) if plddt_values else 0
+            return text, round(avg_plddt, 2)
+    except:
+        pass
+    return None, None
 
 
 # ============================================================
@@ -611,26 +432,22 @@ def get_recommendation(uid):
 # ============================================================
 PRESETS = {
     "Выберите пример... / Select example...": "",
-    "❄️ AFP ржи / Rye AFP (Q9S8C5)": "Q9S8C5",
-    "❄️ TmAFP (P82972)": "P82972",
-    "❄️ IBP водоросли / Algal IBP (A8JHB7)": "A8JHB7",
-    "🔥 HSP70 человека / Human HSP70 (P0DMV8)": "P0DMV8",
-    "🔥 HSP70 E. coli (P0A6Y8)": "P0A6Y8",
-    "🔥 HSP90 дрожжей / Yeast HSP90 (P02829)": "P02829",
-    "🔥 HSP27 человека / Human HSP27 (P04792)": "P04792",
-    "💧 LEA тихоходки / Tardigrade LEA (A0A0K0XZP8)": "A0A0K0XZP8",
-    "💧 LEA артемии / Artemia LEA (Q9NFL3)": "Q9NFL3",
+    "P19479 (Type III AFP)": "P19479",
+    "P0A3E0 (Type I AFP)": "P0A3E0",
+    "P82972 (TmAFP)": "P82972",
+    "A8JHB7 (IBP водоросли)": "A8JHB7",
+    "P0DMV8 (HSP70 человека)": "P0DMV8",
+    "P0A6Y8 (HSP70 E. coli)": "P0A6Y8",
+    "A0A0K0XZP8 (LEA тихоходки)": "A0A0K0XZP8",
 }
 
 # ============================================================
-# HEADER
+# UI
 # ============================================================
 st.title(T["title"])
 st.markdown(T["subtitle"])
+st.markdown(T["main_warning"])
 
-# ============================================================
-# SIDEBAR CONTENT
-# ============================================================
 with st.sidebar:
     st.markdown("---")
     st.header(T["sidebar_header"])
@@ -638,9 +455,6 @@ with st.sidebar:
     st.markdown("---")
     st.markdown(T["sidebar_footer"])
 
-# ============================================================
-# MAIN INTERFACE
-# ============================================================
 col1, col2 = st.columns([2, 1])
 
 with col1:
@@ -648,185 +462,120 @@ with col1:
     preset = st.selectbox(T["select_preset"], list(PRESETS.keys()))
     uniprot_id = st.text_input(T["input_label"], value=PRESETS.get(preset, ""), placeholder=T["input_placeholder"])
 
-with col2:
-    st.markdown(T["criteria_header"])
-    st.info(T["criteria_text"])
-
-# ============================================================
-# ANALYZE BUTTON & RESULTS
-# ============================================================
 if st.button(T["analyze_button"], type="primary", use_container_width=True):
     if not uniprot_id:
         st.warning(T["warning_id"])
     else:
         with st.spinner(T["loading_sequence"]):
             sequence, description = fetch_uniprot_sequence(uniprot_id.strip())
-        
+
         if sequence is None:
             st.error(f"{T['error_load']} {uniprot_id}. {T['check_id']}")
         else:
             st.success(f"{T['success_load']} {description[:100]}...")
-            st.info(get_protein_type(uniprot_id))
-            
+
             with st.spinner(T["analyzing"]):
-                props = analyze_properties(sequence)
-            
+                props, nonstandard = analyze_properties(sequence)
+
             if props is None:
                 st.error(T["error_short"])
             else:
-                scores = calculate_cryoscore(props)
-                toxicity = predict_toxicity(props)
-                penetration = predict_penetration(props)
-                
-                # --- RESULTS ---
+                if nonstandard:
+                    st.warning(T["nonstandard_aa_warning"])
+                    st.info(T["nonstandard_aa_note"])
+
                 st.markdown("---")
                 st.markdown(T["results_header"])
-                
-                col_s, col_f, col_p = st.columns(3)
-                
-                score = scores['cryoscore']
-                with col_s:
-                    delta_text = T["excellent_delta"] if score > 70 else (T["moderate_delta"] if score > 50 else T["low_delta"])
-                    st.metric(T["cryoscore_label"], f"{score:.1f}/100", delta=delta_text)
-                with col_f:
-                    st.metric(T["safety_label"], toxicity['overall'])
-                with col_p:
-                    st.metric(T["penetration_label"], penetration)
-                
-                # --- PASSPORT ---
-                st.markdown(T["passport_header"])
-                
-                passport_values = [
-                    uniprot_id, str(props['length']), f"{props['weight']/1000:.1f}", f"{props['gravy']:.3f}",
-                    f"{props['tsa_pct']:.1f}%", f"{props['isoelectric_point']:.2f}", f"{props['instability']:.1f}",
-                    toxicity['toxic'], toxicity['allergen'], toxicity['stable_in_vitro'], penetration
+
+                values = [
+                    uniprot_id,
+                    str(props['length']),
+                    f"{props['weight']/1000:.1f}",
+                    f"{props['gravy']:.3f}",
+                    f"{props['isoelectric_point']:.2f}",
+                    f"{props['instability']:.1f}",
+                    f"{props['aliphatic_index']:.2f}",
+                    f"{props['charge_ph7']:.2f}",
+                    f"{props['cys_pct']:.1f}%",
+                    f"{props['aromaticity']:.3f}"
                 ]
-                
-                passport_scores = [
-                    "—",
-                    T["score_small"] if props['length'] < 200 else T["score_large"],
-                    T["score_light"] if props['weight'] < 30000 else T["score_heavy"],
-                    T["score_hydrophilic"] if props['gravy'] < 0 else T["score_hydrophobic"],
-                    T["score_high"] if props['tsa_pct'] > 20 else T["score_low"],
-                    "—",
-                    T["score_stable"] if props['instability'] < 40 else T["score_unstable"],
-                    T["score_warn"],
-                    T["score_warn"],
-                    T["score_yes"] if "✅" in toxicity['stable_in_vitro'] else T["score_warn"],
-                    T["score_yes"] if "✅" in penetration else T["score_warn"],
-                ]
-                
+
                 df = pd.DataFrame({
                     T["passport_param_col"]: T["passport_rows"],
-                    T["passport_value_col"]: passport_values,
-                    T["passport_score_col"]: passport_scores
+                    T["passport_value_col"]: values,
+                    T["passport_note_col"]: T["passport_notes"]
                 })
                 st.dataframe(df, use_container_width=True, hide_index=True)
-                
-                # --- CRYOSCORE CHART ---
-                st.markdown(T["cryoscore_chart"])
-                
-                comp = {
-                    T["comp_ice"]: scores['tsa_score'],
-                    T["comp_hydro"]: scores['gravy_score'],
-                    T["comp_size"]: scores['mw_score'],
-                    T["comp_hbond"]: scores['hbond_score'],
-                    T["comp_stab"]: scores['stability_score']
-                }
-                
-                fig = px.bar(x=list(comp.keys()), y=list(comp.values()),
-                           labels={'x': T["chart_x"], 'y': T["chart_y"]},
-                           title=T["chart_cryo_title"],
-                           color=list(comp.values()), color_continuous_scale='RdYlGn', range_color=[0, 100])
-                fig.update_layout(showlegend=False, height=400)
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # --- KD PROFILE ---
+
+                st.markdown(T["comparison_header"])
+                st.markdown(T["comparison_text"])
+
+                ref_df = pd.DataFrame(KNOWN_AFPS)
+                st.markdown(T["ref_table_header"])
+                st.markdown(T["ref_table_note"])
+                st.dataframe(ref_df[["id", "name", "organism", "length", "mw_kda", "gravy", "tha_degC", "irI"]], use_container_width=True, hide_index=True)
+
+                # GRAVY Distribution
+                st.markdown(T["grav_dist_header"])
+                st.markdown(T["grav_dist_text"])
+                fig_grav = go.Figure()
+                fig_grav.add_trace(go.Histogram(x=ref_df['gravy'], nbinsx=8, marker_color='lightblue', opacity=0.7))
+                fig_grav.add_vline(x=props['gravy'], line_width=3, line_color="red", annotation_text=f"{props['gravy']:.3f}")
+                fig_grav.update_layout(height=300, xaxis_title="GRAVY", yaxis_title="Count")
+                st.plotly_chart(fig_grav, use_container_width=True)
+
+                # KD Profile
                 st.markdown(T["kd_header"])
                 if props['kd_profile']:
-                    fig_kd = px.line(y=props['kd_profile'],
-                                   labels={'index': T["kd_x"], 'value': T["kd_y"]},
-                                   title=T["kd_title"])
+                    fig_kd = px.line(
+                        y=props['kd_profile'],
+                        labels={'index': T["kd_x"], 'value': T["kd_y"]},
+                        title=T["kd_title"]
+                    )
                     fig_kd.add_hline(y=0, line_dash="dash", line_color="red", annotation_text=T["kd_boundary"])
-                    fig_kd.add_hline(y=props['gravy'], line_dash="dot", line_color="blue",
-                                   annotation_text=f"GRAVY={props['gravy']:.3f}")
                     fig_kd.update_layout(height=400)
                     st.plotly_chart(fig_kd, use_container_width=True)
-                
-                # --- AA COMPOSITION ---
+
+                # AA Composition
                 st.markdown(T["aa_header"])
-                col_p1, col_p2 = st.columns(2)
-                
-                other_pct = 100 - props['thr_pct'] - props['ser_pct'] - props['ala_pct'] - props['arg_pct'] - props['lys_pct']
-                
-                with col_p1:
-                    aa_df = pd.DataFrame({
-                        T["aa_col"]: [T["aa_thr"], T["aa_ser"], T["aa_ala"], T["aa_arg"], T["aa_lys"], T["aa_other"]],
-                        T["pct_col"]: [props['thr_pct'], props['ser_pct'], props['ala_pct'], props['arg_pct'], props['lys_pct'], other_pct]
-                    })
-                    fig1 = px.pie(aa_df, values=T["pct_col"], names=T["aa_col"], title=T["aa_title"],
-                                 color_discrete_sequence=['#ff6b6b', '#ffd93d', '#6bcb77', '#4d96ff', '#9b59b6', '#bdc3c7'])
-                    fig1.update_traces(textposition='inside', textinfo='percent+label')
-                    fig1.update_layout(height=400)
-                    st.plotly_chart(fig1, use_container_width=True)
-                
-                with col_p2:
-                    func_df = pd.DataFrame({
-                        T["group_col"]: [T["func_hydrophobic"], T["func_polar"], T["func_charged"], T["func_other"]],
-                        T["pct_col"]: [props['ala_pct'], props['thr_pct'] + props['ser_pct'],
-                                      props['arg_pct'] + props['lys_pct'], other_pct]
-                    })
-                    fig2 = px.pie(func_df, values=T["pct_col"], names=T["group_col"], title=T["func_title"],
-                                 color_discrete_sequence=['#e74c3c', '#2ecc71', '#3498db', '#95a5a6'])
-                    fig2.update_traces(textposition='inside', textinfo='percent+label')
-                    fig2.update_layout(height=400)
-                    st.plotly_chart(fig2, use_container_width=True)
-                
-                # --- RECOMMENDATION ---
-                st.markdown("---")
-                st.markdown(T["rec_header"])
-                
-                if score > 70:
-                    st.success(T["rec_excellent_title"])
-                    st.markdown(get_recommendation(uniprot_id))
-                elif score > 50:
-                    st.warning(T["rec_moderate_title"])
-                    st.markdown(T["rec_moderate_text"])
+                counts = Counter(props["sequence"])
+                aa_order = ['A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'Y']
+                aa_pcts = {aa: counts.get(aa, 0) / len(props["sequence"]) * 100 for aa in aa_order if counts.get(aa, 0) > 0}
+                aa_df = pd.DataFrame({
+                    T["aa_col"]: list(aa_pcts.keys()),
+                    T["pct_col"]: list(aa_pcts.values())
+                })
+                fig_aa = px.pie(aa_df, values=T["pct_col"], names=T["aa_col"], title=T["aa_title"])
+                fig_aa.update_traces(textposition='inside', textinfo='percent+label')
+                st.plotly_chart(fig_aa, use_container_width=True)
+
+                # Structure
+                st.markdown(T["structure_header"])
+                st.markdown(T["structure_note"])
+                structure, avg_plddt = get_structure_with_plddt(uniprot_id)
+                if structure and avg_plddt > 70:
+                    st.success(f"{T['structure_plddt_label']} {avg_plddt}")
+                    st.download_button(T["structure_button"], structure, file_name=f"{uniprot_id}.pdb", mime="chemical/x-pdb")
                 else:
-                    st.error(T["rec_low_title"])
-                    st.markdown(T["rec_low_text"])
-                
-                st.info(T["rec_note"])
-                
-                # --- DOWNLOAD ---
+                    st.info(T["structure_error"])
+
+                # Download CSV
                 st.markdown(T["download_header"])
                 csv_data = df.to_csv(index=False).encode('utf-8')
-                st.download_button(T["download_button"], csv_data, f"{uniprot_id}_passport.csv", "text/csv")
+                st.download_button(T["download_button"], csv_data, f"{uniprot_id}_properties.csv", "text/csv")
 
-# ============================================================
-# KNOWLEDGE BASE
-# ============================================================
 st.markdown("---")
 st.markdown(T["kb_header"])
 
-with st.expander(T["kb_afp_title"]):
-    st.markdown(T["kb_afp_text"])
+with st.expander(T["kb_th_title"]):
+    st.markdown(T["kb_th_text"])
 
-with st.expander(T["kb_cryo_title"]):
-    st.markdown(T["kb_cryo_text"])
-
-with st.expander(T["kb_lab_title"]):
-    st.markdown(T["kb_lab_text"])
-
-with st.expander(T["kb_why_title"]):
-    st.markdown(T["kb_why_text"])
+with st.expander(T["kb_iri_title"]):
+    st.markdown(T["kb_iri_text"])
 
 with st.expander(T["limitations_header"]):
     st.markdown(T["limitations_text"])
 
-# ============================================================
-# LINKS & FOOTER
-# ============================================================
 st.markdown("---")
 st.markdown(T["links_header"])
 st.markdown(T["links_text"])
