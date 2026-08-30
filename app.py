@@ -1,6 +1,10 @@
 """
-CryoProtect-Screener: Web application for screening cryoprotectant proteins
+CryoProtect-Screener: Educational web application for screening cryoprotectant proteins
 for cryopreservation of donor organs and biomaterials.
+
+DISCLAIMER:
+This tool is an EDUCATIONAL PROTOTYPE, not a validated scientific predictor.
+All predictions are heuristic and must be confirmed experimentally.
 """
 
 import os
@@ -24,12 +28,13 @@ st.set_page_config(
 )
 
 # ============================================================
-# LANGUAGE
+# TRANSLATIONS
 # ============================================================
+
 TEXTS = {
     "ru": {
         "title": "🧬 КриоПротектор-Скринер",
-        "subtitle": "*In silico* скрининг белков для криоконсервации биоматериала",
+        "subtitle": "*In silico* скрининг белков для криоконсервации биоматериала (образовательный прототип)",
         "sidebar_header": "📋 О приложении",
         "sidebar_text": """**Проблема:** Каждые 17 минут умирает пациент, ожидающий трансплантации. Донорские органы хранятся всего 4–24 часа. Криоконсервация при -196°C могла бы продлить хранение до нескольких лет, создав «банки органов».
 
@@ -46,12 +51,12 @@ TEXTS = {
         "input_label": "UniProt ID:",
         "input_placeholder": "Например: P19479",
         "criteria_header": "🎯 Критерии криопротектора",
-        "criteria_text": """**Универсальные критерии:**
+        "criteria_text": """**Универсальные критерии (гипотетические):**
 1. ❄️ Связывает лёд/воду
 2. 💧 Гидрофильный (GRAVY < 0)
 3. 📏 Малый размер (< 30 кДа)
 4. 🧬 Стабильный (индекс нестабильности < 40)
-5. ✅ Безопасный (предсказанная нетоксичность)
+5. ✅ Безопасный (требует экспериментальной проверки)
 
 **Специфические критерии:**
 - HSP: термостабильность > 60°C
@@ -73,7 +78,7 @@ TEXTS = {
         "cryoscore_label": "CryoScore",
         "safety_label": "Безопасность",
         "penetration_label": "Проникновение в клетки",
-        "excellent_delta": "Отличный кандидат!",
+        "excellent_delta": "Высокий приоритет (гипотетически)",
         "moderate_delta": "Средний",
         "low_delta": "Низкий приоритет",
         "passport_header": "📋 Паспорт кандидата в криопротекторы",
@@ -88,12 +93,12 @@ TEXTS = {
         "score_stable": "✅ Стабилен", "score_unstable": "⚠️ Нестабилен",
         "score_yes": "✅", "score_warn": "⚠️",
         "stable_text": "Стабилен", "unstable_text": "Нестабилен",
-        "toxic_large": "Нетоксичен (крупный белок)",
-        "toxic_short": "Возможна токсичность (короткий пептид)",
-        "toxic_likely": "Вероятно, нетоксичен",
-        "allergen_possible": "Возможна аллергенность",
-        "allergen_likely": "Вероятно, неаллергенен",
-        "safe_yes": "✅ БЕЗОПАСЕН",
+        "toxic_large": "Крупный белок (требует проверки)",
+        "toxic_short": "Короткий пептид (требует проверки)",
+        "toxic_likely": "Оценка неточная (требует проверки)",
+        "allergen_possible": "Возможна аллергенность (не подтверждено)",
+        "allergen_likely": "Аллергенность маловероятна (не подтверждено)",
+        "safe_yes": "✅ БЕЗОПАСЕН (in silico)",
         "safe_check": "⚠️ Требует проверки",
         "pen_strong": "✅ CPP+ (сильное)",
         "pen_moderate": "🟡 Умеренное",
@@ -121,11 +126,12 @@ TEXTS = {
         "aa_col": "Аминокислота", "pct_col": "Процент",
         "group_col": "Группа",
         "rec_header": "💡 Рекомендация",
-        "rec_excellent_title": "🏆 ОТЛИЧНЫЙ КАНДИДАТ!",
+        "rec_excellent_title": "🏆 ВЫСОКИЙ ПРИОРИТЕТ (гипотетически)",
         "rec_moderate_title": "🟡 СРЕДНИЙ КАНДИДАТ",
         "rec_low_title": "🔴 НИЗКИЙ ПРИОРИТЕТ",
         "rec_moderate_text": "Можно тестировать, но не в первую очередь. Рекомендуется сравнить с другими белками из библиотеки.",
         "rec_low_text": "Рекомендуется поискать другие белки. Обратите внимание на белки с высоким T+S+A% и отрицательным GRAVY.",
+        "rec_note": "**Важно:** Все предсказания являются *in silico* оценками и требуют экспериментальной валидации в лабораторных условиях.",
         "rec_hsp": """**Рекомендации для криоконсервации спермы:**
 1. Добавление в криопротекторную среду (0.1–1 мг/мл)
 2. Инкубация со сперматозоидами (30 мин, 37°C)
@@ -174,9 +180,11 @@ TEXTS = {
 - **Стабильность (10%):** инвертированный индекс нестабильности (< 40 = стабилен in vitro)
 
 **Интерпретация:**
-- > 70: отличный кандидат, рекомендуется тестировать in vitro
-- 50–70: средний кандидат
-- < 50: низкий приоритет""",
+- > 70: высокая гипотетическая пригодность
+- 50–70: средняя
+- < 50: низкий приоритет
+
+**Важно:** это эвристическая модель, не валидированный предиктор.""",
         "kb_lab_title": "🔬 Как проверяют криопротекторы в лаборатории?",
         "kb_lab_text": """**Протокол экспериментальной валидации:**
 
@@ -208,13 +216,26 @@ TEXTS = {
 - Создание «банков органов» по аналогии с банками крови
 - Транспортировка органов между континентами
 - Спасение тысяч жизней ежегодно""",
+        "limitations_header": "⚠️ Научные ограничения",
+        "limitations_text": """Этот инструмент создан как **образовательный научный прототип**, а не как валидированный лабораторный предиктор.
+
+**Что важно понимать:**
+- CryoScore — гипотетическая эвристическая модель, основанная на известных свойствах криопротекторных белков.
+- Пороговые значения и веса компонентов **не подтверждены** независимыми экспериментами.
+- Реальная криопротекторная активность измеряется экспериментально: термический гистерезис (°C), выживаемость клеток после разморозки (%), микроскопия кристаллов льда.
+- Предсказания токсичности и проникновения являются **грубой оценкой** и не заменяют специализированные серверы и лабораторные тесты.
+
+**Как использовать этот инструмент:**
+- Для первичного знакомства с белками и их физико-химическими свойствами.
+- Для генерации гипотез, которые затем проверяются экспериментально.
+- Для образовательных целей.""",
         "links_header": "🔗 Полезные ссылки",
         "links_text": "- [UniProt](https://www.uniprot.org/) — база данных белковых последовательностей\n- [PDB](https://www.rcsb.org/) — банк трёхмерных структур белков\n- [ToxinPred2](https://webs.iiitd.edu.in/raghava/toxinpred2/) — предсказание токсичности пептидов\n- [CellPPD](http://crdd.osdd.net/raghava/cellppd/) — предсказание проникающих в клетки пептидов\n- [ESMFold](https://esmatlas.com/) — предсказание 3D-структур белков",
-        "footer": "*CryoProtect-Screener v1.0 | Создано для проекта по биотехнологии | 2026*"
+        "footer": "*CryoProtect-Screener v1.1 | Образовательный прототип | 2026*"
     },
     "en": {
         "title": "🧬 CryoProtect-Screener",
-        "subtitle": "*In silico* screening of proteins for biomaterial cryopreservation",
+        "subtitle": "*In silico* screening of proteins for biomaterial cryopreservation (educational prototype)",
         "sidebar_header": "📋 About",
         "sidebar_text": """**Problem:** Every 17 minutes, a patient awaiting transplantation dies. Donor organs can be stored for only 4–24 hours. Cryopreservation at -196°C could extend storage to years, creating "organ banks".
 
@@ -231,12 +252,12 @@ TEXTS = {
         "input_label": "UniProt ID:",
         "input_placeholder": "Example: P19479",
         "criteria_header": "🎯 Cryoprotectant Criteria",
-        "criteria_text": """**Universal criteria:**
+        "criteria_text": """**Universal criteria (hypothetical):**
 1. ❄️ Ice/water binding
 2. 💧 Hydrophilic (GRAVY < 0)
 3. 📏 Small size (< 30 kDa)
 4. 🧬 Stable (instability index < 40)
-5. ✅ Safe (predicted non-toxic)
+5. ✅ Safe (requires experimental testing)
 
 **Specific criteria:**
 - HSP: thermal stability > 60°C
@@ -258,7 +279,7 @@ TEXTS = {
         "cryoscore_label": "CryoScore",
         "safety_label": "Safety",
         "penetration_label": "Cell Penetration",
-        "excellent_delta": "Excellent candidate!",
+        "excellent_delta": "High priority (hypothetical)",
         "moderate_delta": "Moderate",
         "low_delta": "Low priority",
         "passport_header": "📋 Cryoprotectant Candidate Passport",
@@ -273,12 +294,12 @@ TEXTS = {
         "score_stable": "✅ Stable", "score_unstable": "⚠️ Unstable",
         "score_yes": "✅", "score_warn": "⚠️",
         "stable_text": "Stable", "unstable_text": "Unstable",
-        "toxic_large": "Non-toxic (large protein)",
-        "toxic_short": "Possible toxicity (short peptide)",
-        "toxic_likely": "Likely non-toxic",
-        "allergen_possible": "Possible allergenicity",
-        "allergen_likely": "Likely non-allergenic",
-        "safe_yes": "✅ SAFE",
+        "toxic_large": "Large protein (requires testing)",
+        "toxic_short": "Short peptide (requires testing)",
+        "toxic_likely": "Estimate unreliable (requires testing)",
+        "allergen_possible": "Possible allergenicity (unconfirmed)",
+        "allergen_likely": "Unlikely allergen (unconfirmed)",
+        "safe_yes": "✅ SAFE (in silico)",
         "safe_check": "⚠️ Requires testing",
         "pen_strong": "✅ CPP+ (strong)",
         "pen_moderate": "🟡 Moderate",
@@ -306,11 +327,12 @@ TEXTS = {
         "aa_col": "Amino acid", "pct_col": "Percentage",
         "group_col": "Group",
         "rec_header": "💡 Recommendation",
-        "rec_excellent_title": "🏆 EXCELLENT CANDIDATE!",
+        "rec_excellent_title": "🏆 HIGH PRIORITY (hypothetical)",
         "rec_moderate_title": "🟡 MODERATE CANDIDATE",
         "rec_low_title": "🔴 LOW PRIORITY",
         "rec_moderate_text": "Can be tested, but not a top priority. Consider comparing with other proteins from your library.",
         "rec_low_text": "Consider searching for other proteins. Look for proteins with high T+S+A% and negative GRAVY.",
+        "rec_note": "**Important:** All predictions are *in silico* estimates and require experimental validation in the laboratory.",
         "rec_hsp": """**Recommendations for sperm cryopreservation:**
 1. Addition to cryoprotective medium (0.1–1 mg/mL)
 2. Incubation with spermatozoa (30 min, 37°C)
@@ -359,9 +381,11 @@ TEXTS = {
 - **Stability (10%):** inverted instability index (< 40 = stable in vitro)
 
 **Interpretation:**
-- > 70: excellent candidate, recommended for in vitro testing
-- 50–70: moderate candidate
-- < 50: low priority""",
+- > 70: high hypothetical suitability
+- 50–70: moderate
+- < 50: low priority
+
+**Important:** This is a heuristic model, not a validated predictor.""",
         "kb_lab_title": "🔬 How are cryoprotectants tested in the lab?",
         "kb_lab_text": """**Experimental validation protocol:**
 
@@ -393,9 +417,22 @@ TEXTS = {
 - Creation of "organ banks" similar to blood banks
 - Intercontinental organ transportation
 - Saving thousands of lives annually""",
+        "limitations_header": "⚠️ Scientific Limitations",
+        "limitations_text": """This tool was created as an **educational scientific prototype**, not as a validated laboratory predictor.
+
+**Important to understand:**
+- CryoScore is a hypothetical heuristic model based on known properties of cryoprotective proteins.
+- Thresholds and component weights are **not validated** by independent experiments.
+- Real cryoprotective activity is measured experimentally: thermal hysteresis (°C), post-thaw cell viability (%), ice crystal microscopy.
+- Toxicity and penetration predictions are **rough estimates** and do not replace specialized servers and laboratory tests.
+
+**How to use this tool:**
+- For initial exploration of proteins and their physicochemical properties.
+- For generating hypotheses that can later be tested experimentally.
+- For educational purposes.""",
         "links_header": "🔗 Useful Links",
         "links_text": "- [UniProt](https://www.uniprot.org/) — protein sequence database\n- [PDB](https://www.rcsb.org/) — 3D protein structure bank\n- [ToxinPred2](https://webs.iiitd.edu.in/raghava/toxinpred2/) — peptide toxicity prediction\n- [CellPPD](http://crdd.osdd.net/raghava/cellppd/) — cell-penetrating peptide prediction\n- [ESMFold](https://esmatlas.com/) — 3D protein structure prediction",
-        "footer": "*CryoProtect-Screener v1.0 | Created for a biotechnology project | 2026*"
+        "footer": "*CryoProtect-Screener v1.1 | Educational prototype | 2026*"
     }
 }
 
@@ -405,7 +442,6 @@ TEXTS = {
 if "lang" not in st.session_state:
     st.session_state.lang = "ru"
 
-# Используем пустой контейнер в сайдбаре для переключателя
 with st.sidebar:
     lang_choice = st.radio(
         "🌐 Language / Язык",
@@ -443,6 +479,7 @@ def fetch_uniprot_sequence(uniprot_id):
         pass
     
     return None, None
+
 
 def analyze_properties(sequence):
     clean_seq = sequence.replace("*", "").upper()
@@ -521,19 +558,18 @@ def predict_toxicity(props):
     r = {}
     r['stable_in_vitro'] = ('✅ ' + T['stable_text']) if props['instability'] < 40 else ('⚠️ ' + T['unstable_text'])
     
+    # Грубая оценка. Не является валидированным предсказанием.
     if props['length'] > 100:
-        r['toxic'] = '✅ ' + T['toxic_large']
+        r['toxic'] = '🟡 ' + T['toxic_large']
     elif props['length'] < 20:
-        r['toxic'] = '⚠️ ' + T['toxic_short']
+        r['toxic'] = '🟡 ' + T['toxic_short']
     else:
-        r['toxic'] = '✅ ' + T['toxic_likely']
+        r['toxic'] = '🟡 ' + T['toxic_likely']
     
-    r['allergen'] = ('⚠️ ' + T['allergen_possible']) if props['length'] < 50 else ('✅ ' + T['allergen_likely'])
+    r['allergen'] = ('🟡 ' + T['allergen_possible']) if props['length'] < 50 else ('🟡 ' + T['allergen_likely'])
     
-    if '✅' in r['stable_in_vitro'] and '✅' in r['toxic'] and '✅' in r['allergen']:
-        r['overall'] = T['safe_yes']
-    else:
-        r['overall'] = T['safe_check']
+    # Все предсказания требуют проверки
+    r['overall'] = T['safe_check']
     
     return r
 
@@ -596,19 +632,11 @@ st.markdown(T["subtitle"])
 # SIDEBAR CONTENT
 # ============================================================
 with st.sidebar:
-    # Разделитель после переключателя языка
     st.markdown("---")
-    
-    # Заголовок и текст сайдбара
-    sidebar_header = st.empty()
-    sidebar_text = st.empty()
+    st.header(T["sidebar_header"])
+    st.markdown(T["sidebar_text"])
     st.markdown("---")
-    sidebar_footer = st.empty()
-    
-    # Заполняем актуальными данными
-    sidebar_header.header(T["sidebar_header"])
-    sidebar_text.markdown(T["sidebar_text"])
-    sidebar_footer.markdown(T["sidebar_footer"])
+    st.markdown(T["sidebar_footer"])
 
 # ============================================================
 # MAIN INTERFACE
@@ -682,8 +710,8 @@ if st.button(T["analyze_button"], type="primary", use_container_width=True):
                     T["score_high"] if props['tsa_pct'] > 20 else T["score_low"],
                     "—",
                     T["score_stable"] if props['instability'] < 40 else T["score_unstable"],
-                    T["score_yes"] if "✅" in toxicity['toxic'] else T["score_warn"],
-                    T["score_yes"] if "✅" in toxicity['allergen'] else T["score_warn"],
+                    T["score_warn"],
+                    T["score_warn"],
                     T["score_yes"] if "✅" in toxicity['stable_in_vitro'] else T["score_warn"],
                     T["score_yes"] if "✅" in penetration else T["score_warn"],
                 ]
@@ -758,7 +786,7 @@ if st.button(T["analyze_button"], type="primary", use_container_width=True):
                 st.markdown("---")
                 st.markdown(T["rec_header"])
                 
-                if score > 70 and '✅' in toxicity['overall']:
+                if score > 70:
                     st.success(T["rec_excellent_title"])
                     st.markdown(get_recommendation(uniprot_id))
                 elif score > 50:
@@ -767,6 +795,8 @@ if st.button(T["analyze_button"], type="primary", use_container_width=True):
                 else:
                     st.error(T["rec_low_title"])
                     st.markdown(T["rec_low_text"])
+                
+                st.info(T["rec_note"])
                 
                 # --- DOWNLOAD ---
                 st.markdown(T["download_header"])
@@ -790,6 +820,9 @@ with st.expander(T["kb_lab_title"]):
 
 with st.expander(T["kb_why_title"]):
     st.markdown(T["kb_why_text"])
+
+with st.expander(T["limitations_header"]):
+    st.markdown(T["limitations_text"])
 
 # ============================================================
 # LINKS & FOOTER
